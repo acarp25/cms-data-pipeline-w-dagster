@@ -1,0 +1,18 @@
+[project]
+name = "cms-data-pipeline-w-dagster"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "dagster>=1.12.2",
+    "dagster-dg-cli>=1.12.2",
+    "dagster-duckdb>=0.28.2",
+    "dagster-duckdb-pandas>=0.28.2",
+    "dagster-webserver>=1.12.2",
+    "dbt-duckdb>=1.10.0",
+    "duckdb>=1.4.2",
+]
+
+[tool.dagster]
+module_name = "code.definitions"  # or your Dagster project module name
