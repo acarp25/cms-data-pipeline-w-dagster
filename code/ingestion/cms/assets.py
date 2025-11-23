@@ -1,5 +1,6 @@
 from pathlib import Path
 import tempfile, requests, zipfile
+import pandas as pd
 
 import dagster as dg 
 from dagster_duckdb import DuckDBResource
@@ -10,13 +11,23 @@ from dagster_duckdb import DuckDBResource
 #set db and schema based on folder structure, (ingestion, cms)
 DATABASE, SCHEMA = Path(__file__).parent.parent.name, Path(__file__).parent.name
 
+# using dynamic partitions over fixed monthly partitions
+# it's often the case that the new month of data is added irregularly 
+# for the case of the 2025 gov shutdown, data was delayed 2 months
+cms_monthly_partitions = dg.DynamicPartitionsDefinition(name="cms_monthly_partitions")
+
+class cms_config(dg.Config):
+    url: str = "https://www.cms.gov/files/zip/ma-enrollment-state-county-contract-{partition_key}-abridged-version-exclude-rows-10-or-less-enrollees.zip"
+
 @dg.asset(
     group_name=DATABASE.upper(),
     description="Medicare Advantage Enrollment by State, County, and Contract",
     kinds={"CMS"},
+    partitions_def=cms_monthly_partitions,
 )
-def medicare_advantage_enrollment_by_state_county_contract(context: dg.AssetExecutionContext, duckdb: DuckDBResource):
-    url = "https://www.cms.gov/files/zip/ma-enrollment-state-county-contract-november-2025-abridged-version-exclude-rows-10-or-less-enrollees.zip"
+def medicare_advantage_enrollment_by_state_county_contract(context: dg.AssetExecutionContext, duckdb: DuckDBResource, config: cms_config):
+    partition_key = context.partition_key
+    url = config.url.format(partition_key=partition_key)
     # Download zip to temp location in data directory
     data_dir = Path("data/temp/")
     data_dir.mkdir(exist_ok=True, parents=True)
@@ -24,6 +35,9 @@ def medicare_advantage_enrollment_by_state_county_contract(context: dg.AssetExec
     context.log.info(f"Downloading data from {url}")
     with tempfile.NamedTemporaryFile(suffix=".zip", dir=data_dir, delete=False) as tmp_zip:
         response = requests.get(url)
+        if response.status_code != 200:
+            context.log.error(f"Failed to download data: HTTP {response.status_code}")
+            raise ValueError(f"Failed to download data: HTTP {response.status_code}")
         tmp_zip.write(response.content)
         zip_path = tmp_zip.name
 
@@ -35,13 +49,20 @@ def medicare_advantage_enrollment_by_state_county_contract(context: dg.AssetExec
         csv_name = csv_names[0]
         extracted_csv_path = data_dir / csv_name
         zip_ref.extract(csv_name, path=data_dir)
+    
+    #add partition_key to column
+    df = pd.read_csv(extracted_csv_path)
+    df["partition_key"] = partition_key
+    df["record_created_at"] = pd.Timestamp.now()
+    num_rows = len(df) 
 
     context.log.info(f"Loading data into {SCHEMA}.medicare_advantage_enrollment_by_state_county_contract")
     table_name = f"medicare_advantage_enrollment_by_state_county_contract"
     with duckdb.get_connection() as conn:
         conn.execute(f"CREATE SCHEMA IF NOT EXISTS {SCHEMA}")
-        conn.execute(f"CREATE TABLE IF NOT EXISTS {SCHEMA}.{table_name} AS SELECT * FROM read_csv_auto('{extracted_csv_path}')")
-        num_rows = conn.execute(f"SELECT COUNT(*) FROM {SCHEMA}.{table_name}").fetchone()[0]
+        conn.execute(f"CREATE TABLE IF NOT EXISTS {SCHEMA}.{table_name} AS SELECT * FROM df")
+        #TODO check if table exists, if so append, potentially merge in existing records
+        
 
     context.log.info(f"Cleaning up temporary files")
     for item in data_dir.iterdir():
@@ -55,6 +76,7 @@ def medicare_advantage_enrollment_by_state_county_contract(context: dg.AssetExec
     return dg.MaterializeResult(
         metadata={
             "table": dg.MetadataValue.text(f"{SCHEMA}.{table_name}"),
+            "url": dg.MetadataValue.text(url),
             "num_rows": dg.MetadataValue.int(num_rows)
         }
     )
