@@ -8,7 +8,7 @@ from . import assets
 
 @dg.sensor(
     job=jobs.cms_refresh,
-    minimum_interval_seconds=60, 
+    minimum_interval_seconds=30, 
     description="Sensor to check for new monthly Medicare Advantage Enrollment data",
 )
 def medicare_advantage_enrollment_by_state_county_contract_sensor(context: dg.SensorEvaluationContext):
@@ -31,33 +31,20 @@ def medicare_advantage_enrollment_by_state_county_contract_sensor(context: dg.Se
     context.log.info(f"Checking data availability for {month_year}")
     base_url = f"https://www.cms.gov/files/zip/ma-enrollment-state-county-contract-{month_year}-abridged-version-exclude-rows-10-or-less-enrollees.zip"
     backup_url = f"https://www.cms.gov/files/zip/ma-enrollment-state/county/contract-{month_year}-abridged-version-exclude-rows-10-or-less-enrollees.zip"
+    backup_url_2 = f"https://www.cms.gov/files/zip/ma-enrollment-state/county/contract-{month_year}-abridged-version-exclude-rows-10-or-less.zip"
+    
     try:
-        response = requests.head(base_url, allow_redirects=True, timeout=10)
-        if response.status_code == 200:
-            context.log.info("Data source is available.")
-            context.update_cursor(month_year)
-            return dg.SensorResult(
-                run_requests=[
-                    dg.RunRequest(
-                        run_key=f"{month_year}",
-                        partition_key=month_year,
-                        run_config={
-                            "ops": {
-                                "medicare_advantage_enrollment_by_state_county_contract": {
-                                    "config": {"url": base_url}
-                                }
-                            }
-                        },
-                    )
-                ],
-                dynamic_partitions_requests=[assets.cms_monthly_partitions.build_add_request([month_year])],
-            )
-        elif response.status_code == 404:
-            # Try backup URL
-            context.log.warning("Data source not found at base URL, trying backup URL.")
-            response = requests.head(backup_url, allow_redirects=True, timeout=10)
+        urls = [base_url, backup_url, backup_url_2]
+        for url in urls:
+            try:
+                response = requests.head(url, allow_redirects=True, timeout=10)
+            except requests.RequestException as e:
+                context.log.warning(f"Error checking URL {url}: {e}")
+                # try the next URL
+                continue
+
             if response.status_code == 200:
-                context.log.info("Data source is available at backup URL.")
+                context.log.info(f"Data source is available at {url}.")
                 context.update_cursor(month_year)
                 return dg.SensorResult(
                     run_requests=[
@@ -67,7 +54,7 @@ def medicare_advantage_enrollment_by_state_county_contract_sensor(context: dg.Se
                             run_config={
                                 "ops": {
                                     "medicare_advantage_enrollment_by_state_county_contract": {
-                                        "config": {"url": backup_url}
+                                        "config": {"url": url}
                                     }
                                 }
                             },
@@ -76,11 +63,11 @@ def medicare_advantage_enrollment_by_state_county_contract_sensor(context: dg.Se
                     dynamic_partitions_requests=[assets.cms_monthly_partitions.build_add_request([month_year])],
                 )
             else:
-                context.log.warning(f"Data source not found at backup URL either (status code {response.status_code}). No run will be triggered.")
-                return dg.SkipReason(f"Data for {month_year} not yet available.")
-        else:
-            context.log.warning(f"Data source returned status code {response.status_code}. No run will be triggered.")
-            return dg.SkipReason(f"Data for {month_year} not yet available (status {response.status_code}).")
+                context.log.info(f"URL {url} returned status code {response.status_code}; trying next URL if available.")
+
+        # If we get here, none of the URLs returned 200
+        context.log.warning(f"Data source not found at any tested URL for {month_year}. No run will be triggered.")
+        return dg.SkipReason(f"Data for {month_year} not yet available.")
     except requests.RequestException as e:
         context.log.error(f"Error checking data source availability: {e}")
         return dg.SkipReason(f"Error checking data source availability: {e}")
