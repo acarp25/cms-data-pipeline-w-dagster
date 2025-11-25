@@ -60,7 +60,7 @@ def medicare_advantage_enrollment_by_state_county_contract(context: dg.AssetExec
 
     context.log.info(f"Loading data into {SCHEMA}.medicare_advantage_enrollment_by_state_county_contract")
     table_name = f"medicare_advantage_enrollment_by_state_county_contract"
-    db_utils.load_dataframe_to_duckdb(context, duckdb, df, table_name, SCHEMA, overwrite=False)        
+    db_utils.upsert_dataframe_to_duckdb(context, duckdb, df, table_name, SCHEMA, key_columns=["partition_key", "SSA Code", "FIPS Code", "Contract ID"])        
 
     context.log.info(f"Cleaning up temporary files")
     for item in data_dir.iterdir():
