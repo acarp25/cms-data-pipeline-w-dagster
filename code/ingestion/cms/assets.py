@@ -5,6 +5,8 @@ import pandas as pd
 import dagster as dg 
 from dagster_duckdb import DuckDBResource
 
+from ...utils import duckdb_utils as db_utils
+
 #monthly medicare advantage enrollment by state/county/contract
 #https://www.cms.gov/data-research/statistics-trends-and-reports/medicare-advantagepart-d-contract-and-enrollment-data/monthly-ma-enrollment-state/county/contract
 
@@ -58,11 +60,7 @@ def medicare_advantage_enrollment_by_state_county_contract(context: dg.AssetExec
 
     context.log.info(f"Loading data into {SCHEMA}.medicare_advantage_enrollment_by_state_county_contract")
     table_name = f"medicare_advantage_enrollment_by_state_county_contract"
-    with duckdb.get_connection() as conn:
-        conn.execute(f"CREATE SCHEMA IF NOT EXISTS {SCHEMA}")
-        conn.execute(f"CREATE TABLE IF NOT EXISTS {SCHEMA}.{table_name} AS SELECT * FROM df")
-        #TODO check if table exists, if so append, potentially merge in existing records
-        
+    db_utils.load_dataframe_to_duckdb(context, duckdb, df, table_name, SCHEMA, overwrite=False)        
 
     context.log.info(f"Cleaning up temporary files")
     for item in data_dir.iterdir():
