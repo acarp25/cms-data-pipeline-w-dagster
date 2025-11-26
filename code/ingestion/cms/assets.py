@@ -78,7 +78,3 @@ def medicare_advantage_enrollment_by_state_county_contract(context: dg.AssetExec
             "num_rows": dg.MetadataValue.int(num_rows)
         }
     )
-
-@dg.asset()
-def dummy_asset():
-    pass
