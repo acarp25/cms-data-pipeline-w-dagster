@@ -8,7 +8,7 @@ from . import assets
 
 @dg.sensor(
     job=jobs.cms_refresh,
-    minimum_interval_seconds=30, 
+    minimum_interval_seconds=60*60, # check every hour
     description="Sensor to check for new monthly Medicare Advantage Enrollment data",
 )
 def medicare_advantage_enrollment_by_state_county_contract_sensor(context: dg.SensorEvaluationContext):
